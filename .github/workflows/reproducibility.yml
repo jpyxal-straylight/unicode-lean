@@ -1,0 +1,147 @@
+name: reproducibility
+
+# Tier 2 (slow, nightly). Verifies that the Nix-pinned environment
+# rebuilds the library reproducibly from a cold cache, that the
+# committed `flake.lock` is in sync with the inputs declared in
+# `flake.nix`, and that two consecutive `lake build` invocations
+# produce byte-identical artifacts.
+#
+# Branch protection on `main` does NOT need to require this workflow;
+# it is a reproducibility audit, not a merge gate. Tier 1 (`ci.yml`)
+# is the gate.
+
+on:
+  schedule:
+    # Daily at 04:17 UTC. Avoids the top-of-hour scheduler stampede
+    # on GitHub-hosted runners.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "lakefile.lean"
+      - "lean-toolchain"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  flake-lock-shape:
+    # Refuses to run downstream jobs if `flake.lock` is missing any input
+    # declared in `flake.nix`. Plain `nix flake lock` only adds missing
+    # entries; it does not re-fetch existing pins. So if the diff is
+    # non-empty after this command, an input was added to `flake.nix`
+    # without committing the corresponding lock update — the failure
+    # this job is here to catch.
+    #
+    # Upstream movement on the pinned branches (e.g. `nixos-unstable`
+    # advancing) is NOT considered a failure here — that bump is
+    # Dependabot's responsibility.
+    name: flake.lock covers every input in flake.nix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: lock and diff
+        run: |
+          cp flake.lock /tmp/flake.lock.committed
+          nix flake lock
+          if ! diff -q /tmp/flake.lock.committed flake.lock; then
+            echo "FATAL: flake.lock is missing inputs declared in flake.nix."
+            echo "Run \`nix flake lock\` locally and commit the result."
+            diff -u /tmp/flake.lock.committed flake.lock || true
+            exit 1
+          fi
+          echo "clean: flake.lock covers every input declared in flake.nix"
+
+  flake-check:
+    # Runs every check declared in `flake.nix` (`checks.no-sorry`,
+    # `checks.build`). Sandbox-friendly except for the elan toolchain
+    # fetch, which the flake gates with `__noChroot = true`.
+    name: nix flake check
+    runs-on: ubuntu-latest
+    needs: flake-lock-shape
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = relaxed
+
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+
+  build-determinism:
+    # Two consecutive `lake build` runs on the same source tree should
+    # produce byte-identical `.olean` artifacts. A divergence here
+    # signals nondeterministic emission (timestamps, address-order
+    # hashing, hash-randomisation in dependent code) and breaks
+    # the property that "rebuilding from source verifies the proof".
+    name: lake build is deterministic
+    runs-on: ubuntu-latest
+    needs: flake-lock-shape
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: leanprover/lean-action@v1
+        with:
+          build-args: ""
+
+      - name: snapshot pass-1 oleans
+        run: |
+          find .lake/build -name '*.olean' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > /tmp/oleans-pass1.sha256
+          wc -l /tmp/oleans-pass1.sha256
+
+      - name: clean and rebuild
+        run: |
+          lake clean
+          lake build
+
+      - name: snapshot pass-2 oleans
+        run: |
+          find .lake/build -name '*.olean' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > /tmp/oleans-pass2.sha256
+
+      - name: compare passes
+        run: |
+          if ! diff -q /tmp/oleans-pass1.sha256 /tmp/oleans-pass2.sha256; then
+            echo "FATAL: two consecutive lake builds produced different oleans."
+            diff -u /tmp/oleans-pass1.sha256 /tmp/oleans-pass2.sha256 || true
+            exit 1
+          fi
+          echo "clean: lake build is byte-identical across two passes"
+
+      - name: publish olean SHA-256 manifest
+        # Downstream auditors can compare their local `.olean` hashes
+        # against this manifest to confirm their build matches the
+        # canonical build. Retained for 90 days per the default
+        # actions/upload-artifact policy.
+        uses: actions/upload-artifact@v4
+        with:
+          name: oleans-sha256-${{ github.sha }}
+          path: /tmp/oleans-pass2.sha256
+          retention-days: 90

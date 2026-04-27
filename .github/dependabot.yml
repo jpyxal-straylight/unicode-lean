@@ -1,0 +1,24 @@
+version: 2
+
+# Bumps are gated on CODEOWNERS review (see `.github/CODEOWNERS`) and
+# must pass `ci / hardening` + `ci / build` before merge.
+#
+# The Lean toolchain itself is pinned via `lean-toolchain`; Dependabot
+# does not have a Lean ecosystem, so toolchain bumps are manual.
+#
+# Nix flake inputs are bumped by `.github/workflows/flake-update.yml`,
+# not Dependabot — Dependabot has no Nix ecosystem.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    reviewers:
+      - "jpyxal-straylight"
