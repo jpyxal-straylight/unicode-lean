@@ -140,7 +140,7 @@ jobs:
         # against this manifest to confirm their build matches the
         # canonical build. Retained for 90 days per the default
         # actions/upload-artifact policy.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oleans-sha256-${{ github.sha }}
           path: /tmp/oleans-pass2.sha256
