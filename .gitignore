@@ -1,0 +1,8 @@
+.lake/
+.elan/
+*.olean
+*.ilean
+*.hash
+.direnv/
+result
+result-*

@@ -1,0 +1,41 @@
+unicode
+Copyright 2026
+
+Licensed under the Apache License, Version 2.0 (the "License").
+A copy of the License is provided in the file LICENSE in this
+distribution. See the License for the specific language governing
+permissions and limitations under the License.
+
+────────────────────────────────────────────────────────────────────
+                        BUNDLED UNICODE DATA
+────────────────────────────────────────────────────────────────────
+
+This product bundles, under `Unicode/Ucd/`, source data files from
+the Unicode Character Database (UCD) version 17.0.0:
+
+  BidiBrackets.txt
+  BidiMirroring.txt
+  CaseFolding.txt
+  CompositionExclusions.txt
+  confusables.txt
+  DerivedBidiClass.txt
+  DerivedCoreProperties.txt
+  DerivedNormalizationProps.txt
+  EastAsianWidth.txt
+  IdentifierStatus.txt
+  IdentifierType.txt
+  IdnaMappingTable.txt
+  MANIFEST.txt
+  NormalizationTest.txt
+  PropList.txt
+  ScriptExtensions.txt
+  Scripts.txt
+  UnicodeData.txt
+
+These files are © 1991–2024 Unicode, Inc. and are redistributed
+under the terms of the Unicode License v3:
+
+  https://www.unicode.org/license.txt
+
+The Unicode® and Unicode logo are registered trademarks of
+Unicode, Inc. in the United States and other countries.

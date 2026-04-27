@@ -1,0 +1,26 @@
+# Every change to this repository requires review by a code owner.
+# GitHub will block merge until at least one CODEOWNER approves the
+# pull request. Branch protection on `main` should additionally
+# require:
+#   - the `ci / hardening` check
+#   - the `ci / build` check
+#   - linear history (no merge commits on `main`)
+#   - conversation resolution before merge
+# See `CONTRIBUTING.md` § Branch Protection for the `gh api` command
+# that applies these settings.
+
+*                                       @jpyxal-straylight
+
+# Source-of-truth artifacts. Tampering with these would silently
+# weaken the formal-verification claims, so they get an explicit
+# entry to make the audit trail obvious in `git blame`.
+/Unicode/Ucd/                           @jpyxal-straylight
+/Unicode/Ucd/SHA256SUMS                 @jpyxal-straylight
+/lean-toolchain                         @jpyxal-straylight
+/lakefile.lean                          @jpyxal-straylight
+/flake.nix                              @jpyxal-straylight
+/flake.lock                             @jpyxal-straylight
+/scripts/                               @jpyxal-straylight
+/.github/                               @jpyxal-straylight
+/LICENSE                                @jpyxal-straylight
+/NOTICE                                 @jpyxal-straylight

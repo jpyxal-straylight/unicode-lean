@@ -1,0 +1,60 @@
+name: flake-update
+
+# Weekly bump of `flake.lock` inputs (`nixpkgs`, `flake-utils`).
+# Dependabot does not have a Nix ecosystem, so this workflow plays
+# the equivalent role: open a pull request when the upstream-pinned
+# branches advance. The PR is gated on `ci / hardening` and
+# `ci / build` (Tier 1) and on CODEOWNER review like every other
+# PR. The nightly `reproducibility` workflow then verifies that
+# the new pin still produces a deterministic build.
+
+on:
+  schedule:
+    # Monday at 06:00 UTC. Dependabot also runs Mondays.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  flake-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: update flake.lock
+        run: nix flake update
+
+      - name: open PR if flake.lock changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "nix: weekly flake.lock bump"
+          title: "nix: weekly flake.lock bump"
+          body: |
+            Automated weekly bump of `flake.lock` inputs.
+
+            Verify locally:
+            ```
+            nix flake check
+            ```
+
+            CI must pass:
+            - `ci / hardening`
+            - `ci / build`
+
+            And the nightly `reproducibility` workflow on `main`
+            should be green after this merges.
+          branch: nix/flake-update
+          delete-branch: true
+          labels: |
+            dependencies
+            nix

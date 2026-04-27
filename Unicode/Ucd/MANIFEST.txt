@@ -1,0 +1,16 @@
+UnicodeData.txt                 	 2198209	2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c
+DerivedCoreProperties.txt       	 1134783	24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08
+CompositionExclusions.txt       	    9007	2f239196ef3b5b61db5cc476e9bd80f534d15aa1b74e1be1dea5d042a344c85f
+DerivedBidiClass.txt            	  173433	4867b4b7f0731ed1bfcd34cc6251211ff1542541fce0734b6fbda139ee80b3a4
+DerivedNormalizationProps.txt   	 1377582	71fd6a206a2c0cdd41feb6b7f656aa31091db45e9cedc926985d718397f9e488
+CaseFolding.txt                 	   87539	ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183
+EastAsianWidth.txt              	  201595	ea7ce50f3444a050333448dffef1cadd9325af55cbb764b4a2280faf52170a33
+confusables.txt                 	  722509	95bd0aad6dced5ebc63436f459c06ab21a8d107cd842fb57f5c3a1e91bca8611
+IdentifierStatus.txt            	   48622	c6108ca140e054b55a5b0378e7ebed8b1ef0e846251f6195361bc9af8ffc61b1
+IdentifierType.txt              	  249593	c7e57f71176fb3035e0c85e4d9f30b08374588b2bd16e729efbc7e49c7c9438f
+Scripts.txt                     	  192460	9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf
+ScriptExtensions.txt            	   20707	ec2107e58825a1586acee8e0911ce18260394ac8b87e535ca325f1ccbeb06bc6
+PropList.txt                    	  145465	130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd
+IdnaMappingTable.txt            	  780543	6db2ef4ed35f3b3de74ebc2e00404a9607f76d499f576b8d4043cf14f1ed175c
+BidiBrackets.txt                	    8891	dadbaf38a0d0246e5b805bf8725cb81b7c621f93d030595635f5ba2c2f179428
+BidiMirroring.txt               	   26827	a2f16fb873ab4fcdf3221cb1a8a85a134ddd6ed03603181823ff5206af3741ce
