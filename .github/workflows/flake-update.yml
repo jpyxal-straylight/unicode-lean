@@ -35,7 +35,7 @@ jobs:
         run: nix flake update
 
       - name: open PR if flake.lock changed
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "nix: weekly flake.lock bump"
           title: "nix: weekly flake.lock bump"
