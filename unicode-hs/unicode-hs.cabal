@@ -1,0 +1,90 @@
+cabal-version:      3.0
+name:               unicode-hs
+version:            0.2.0
+synopsis:           Haskell port of unicode-lean — UCD 17.0.0 codecs and validators
+description:
+  Strict UTF-8 / UTF-16 / UTF-32 codecs, BOM detection, noncharacter
+  detection, strict-ASCII identifiers, UTF-8 blob and validated-UTF-8
+  refinement types. Algorithmic re-implementation of the unicode-lean
+  reference in pure Haskell, validated against the same per-module
+  theorems and the UCD 17.0.0 conformance fixtures.
+  .
+  Phase 2 (current release): every table-free codec from
+  unicode-lean's @Unicode/Codec/@ tree. UCD-table-backed atoms
+  (UAX #31 default identifier, RFC 8264/8265 PRECIS profiles, the
+  printable-UTF-8 profile) ship in a later phase once the table-
+  codegen path lands.
+license:            MIT
+license-file:       LICENSE
+author:             jpyxal
+maintainer:         pyxalpendant@gmail.com
+copyright:          2026 jpyxal
+category:           Text
+build-type:         Simple
+extra-doc-files:    README.md
+extra-source-files: data/UCD-VERSION
+tested-with:        GHC == 9.12.*
+
+source-repository head
+  type:     git
+  location: https://github.com/jpyxal/unicode-hs
+
+common warnings
+  default-language: GHC2021
+  default-extensions:
+      BangPatterns
+      DataKinds
+      DerivingStrategies
+      StrictData
+  ghc-options:
+      -Wall
+      -Werror
+      -Wcompat
+      -Widentities
+      -Wincomplete-record-updates
+      -Wincomplete-uni-patterns
+      -Wmissing-export-lists
+      -Wmissing-import-lists
+      -Wpartial-fields
+      -Wredundant-constraints
+      -Wunused-packages
+
+library
+  import:           warnings
+  hs-source-dirs:   src
+  exposed-modules:
+      Unicode.Codec.Bom
+      Unicode.Codec.Identifier
+      Unicode.Codec.Noncharacters
+      Unicode.Codec.OpaqueBlob
+      Unicode.Codec.Strict
+      Unicode.Codec.Utf8
+      Unicode.Codec.Utf16
+      Unicode.Codec.Utf32
+      Unicode.Codec.ValidatedUtf8
+  build-depends:
+      base        >=4.18  && <5
+    , bytestring  >=0.11  && <0.13
+
+test-suite unicode-hs-test
+  import:           warnings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  other-modules:
+      BomSpec
+      IdentifierSpec
+      NoncharactersSpec
+      OpaqueBlobSpec
+      Utf8Spec
+      Utf16Spec
+      Utf32Spec
+      ValidatedUtf8Spec
+  build-depends:
+      base               >=4.18 && <5
+    , bytestring         >=0.11 && <0.13
+    , tasty              >=1.4  && <1.6
+    , tasty-hunit        >=0.10 && <0.11
+    , tasty-quickcheck   >=0.10 && <0.12
+    , QuickCheck         >=2.14 && <2.16
+    , unicode-hs
