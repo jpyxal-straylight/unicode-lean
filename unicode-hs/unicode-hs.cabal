@@ -27,7 +27,9 @@ tested-with:        GHC == 9.12.*
 
 source-repository head
   type:     git
-  location: https://github.com/jpyxal/unicode-hs
+  location: https://github.com/aiartlord/unicode-lean
+  subdir:   unicode-hs
+  branch:   haskell-port
 
 common warnings
   default-language: GHC2021

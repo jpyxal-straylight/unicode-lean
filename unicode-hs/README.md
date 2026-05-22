@@ -73,7 +73,7 @@ In `lemma/cabal.project`:
 ```cabal
 source-repository-package
   type:     git
-  location: https://github.com/jpyxal-straylight/unicode-lean
+  location: https://github.com/aiartlord/unicode-lean
   tag:      <commit-sha-on-haskell-port-branch>
   subdir:   unicode-hs
 
@@ -90,7 +90,7 @@ In `lemma/flake.nix`:
 ```nix
 inputs.unicode-hs.url = "path:../unicode/unicode-hs";
 -- Or, pinned to the haskell-port branch:
--- inputs.unicode-hs.url = "github:jpyxal-straylight/unicode-lean/haskell-port?dir=unicode-hs";
+-- inputs.unicode-hs.url = "github:aiartlord/unicode-lean/haskell-port?dir=unicode-hs";
 ```
 
 The flake exports `packages.unicode-hs` and a `devShells.default` with
