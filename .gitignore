@@ -1,0 +1,45 @@
+# CMake build artifacts
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+*.cmake
+!CMakeLists.txt
+!*.cmake.in
+
+# Compiler artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Editor / IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Leftover material from sibling ports / Lean reference
+.lake/
+.elan/
+*.olean
+*.ilean
+docs/
+.claude/
+.direnv/
+result
+result-*
