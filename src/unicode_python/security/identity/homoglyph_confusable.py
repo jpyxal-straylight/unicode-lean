@@ -1,0 +1,375 @@
+"""Detection of homoglyph / confusable identifier substitution attacks.
+
+Threat model.  Tier A1..A3 (local injector through supply-chain
+injector).  An adversary registers a package, identifier, or
+domain whose visible glyph stream is indistinguishable from a
+canonical target's, but whose byte stream differs at one or more
+positions (Cyrillic 'е' posed as Latin 'e', Mathematical Bold 'A'
+posed as plain 'A', Fullwidth 'Ａ' posed as 'A').  The motivating
+real-world instance is the October 2025 Nethereum NuGet supply-
+chain campaign — twelve packages whose names differed from
+canonical Web3 / Solana toolchain names by a single Cyrillic
+codepoint substitution.
+
+Detection strategy.  Project the input and a curated catalogue of
+canonical targets through the UTS #39 §4 confusable-skeleton
+mapping, iterate to a fixed point, and test equality.  Hazard
+when the input's iterated skeleton matches a target's iterated
+skeleton while the literal codepoint sequences differ.  Layered
+with two range-based predicates:
+
+  - Mathematical Alphanumeric Symbols (U+1D400..U+1D7FF) —
+    Mathematical Bold / Italic / Fraktur / Script / Sans-Serif /
+    Double-Struck Latin and digit letters that render as their
+    plain-ASCII counterparts.
+  - Halfwidth and Fullwidth Forms (U+FF01..U+FFEF) — fullwidth
+    Latin variants that render at full character-cell width.
+
+Six sub-threats are evaluated in fixed priority order
+(highest first):
+
+  - ``TargetMatch``        — input's iterated skeleton matches a
+    canonical target's iterated skeleton.
+  - ``MathAlpha``          — input contains Mathematical
+    Alphanumeric Symbols.
+  - ``WidthClass``         — input contains fullwidth / halfwidth
+    ASCII variants.
+  - ``DecompositionSwap``  — input is not in NFC; ``to_nfc(input)``
+    differs at one or more positions.
+  - ``CrossScriptMix``     — input mixes two or more non-Common,
+    non-Inherited scripts and is not Highly Restrictive.
+  - ``RestrictionLow``     — input's UTS #39 § 5.1 restriction
+    level is Minimally Restrictive or Unrestricted.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Union
+
+from ..calculus import ClassificationKind
+from . import ucd
+from .ucd import RestrictionLevel
+
+# ─────────────────────────────────────────────────────────────────────
+# Data loading
+# ─────────────────────────────────────────────────────────────────────
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _load_confusables() -> dict[int, list[int]]:
+    """Parse confusables.txt into a source-codepoint → skeleton map."""
+    path = _DATA_DIR / "confusables.txt"
+    out: dict[int, list[int]] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            stripped = raw_line.split("#", 1)[0].strip()
+            if not stripped:
+                continue
+            parts = stripped.split(";")
+            if len(parts) < 2:
+                continue
+            src_field = parts[0].strip()
+            tgt_field = parts[1].strip()
+            try:
+                src = int(src_field, 16)
+            except ValueError:
+                continue
+            tgt: list[int] = []
+            for hex_token in tgt_field.split():
+                try:
+                    tgt.append(int(hex_token, 16))
+                except ValueError as err:
+                    raise ValueError(
+                        f"confusables.txt: malformed target codepoint "
+                        f"{hex_token!r} for source U+{src:04X}"
+                    ) from err
+            if not tgt:
+                continue
+            out[src] = tgt
+    return out
+
+
+def _load_known_attack_targets() -> list[str]:
+    """Parse the curated attack-target list into a list of names."""
+    path = _DATA_DIR / "KnownAttackTargets.txt"
+    out: list[str] = []
+    with path.open("r", encoding="utf-8") as f:
+        for raw_line in f:
+            trimmed = raw_line.strip()
+            if not trimmed or trimmed.startswith("#"):
+                continue
+            out.append(trimmed)
+    return out
+
+
+_CONFUSABLES_MAP: dict[int, list[int]] | None = None
+_KNOWN_ATTACK_TARGETS: list[str] | None = None
+
+
+def confusables_map() -> dict[int, list[int]]:
+    """Return the parsed confusables map (cached after first call)."""
+    global _CONFUSABLES_MAP
+    if _CONFUSABLES_MAP is None:
+        _CONFUSABLES_MAP = _load_confusables()
+    return _CONFUSABLES_MAP
+
+
+def known_attack_targets() -> list[str]:
+    """Return the parsed attack-target list (cached after first call)."""
+    global _KNOWN_ATTACK_TARGETS
+    if _KNOWN_ATTACK_TARGETS is None:
+        _KNOWN_ATTACK_TARGETS = _load_known_attack_targets()
+    return _KNOWN_ATTACK_TARGETS
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Skeleton machinery
+# ─────────────────────────────────────────────────────────────────────
+
+
+def skeleton(input_cps: list[int]) -> list[int]:
+    """One application of the UTS #39 confusable mapping.
+
+    Each codepoint is replaced by its skeleton image (if present in
+    the confusables map) or by itself (if absent).
+    """
+    cmap = confusables_map()
+    out: list[int] = []
+    for cp in input_cps:
+        replacement = cmap.get(cp)
+        if replacement is None:
+            out.append(cp)
+        else:
+            out.extend(replacement)
+    return out
+
+
+def iterated_skeleton(input_cps: list[int]) -> list[int]:
+    """Apply ``skeleton`` until a fixed point.
+
+    In practice 1–3 iterations suffice for every published
+    confusable chain.
+    """
+    current = list(input_cps)
+    while True:
+        nxt = skeleton(current)
+        if nxt == current:
+            return current
+        current = nxt
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Range predicates
+# ─────────────────────────────────────────────────────────────────────
+
+
+def is_math_alphanumeric(cp: int) -> bool:
+    """U+1D400..U+1D7FF — Mathematical Alphanumeric Symbols block."""
+    return 0x1D400 <= cp <= 0x1D7FF
+
+
+def is_fullwidth_halfwidth(cp: int) -> bool:
+    """U+FF01..U+FFEF — Halfwidth and Fullwidth Forms block."""
+    return 0xFF01 <= cp <= 0xFFEF
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Sub-threat ADT + verdict
+# ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class TargetMatch:
+    target: str
+
+
+@dataclass(frozen=True, slots=True)
+class MathAlpha:
+    first_cp: int
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class WidthClass:
+    first_cp: int
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class DecompositionSwap:
+    first_diff_pos: int
+
+
+@dataclass(frozen=True, slots=True)
+class CrossScriptMix:
+    script_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class RestrictionLow:
+    level: RestrictionLevel
+
+
+SubThreat = Union[
+    TargetMatch,
+    MathAlpha,
+    WidthClass,
+    DecompositionSwap,
+    CrossScriptMix,
+    RestrictionLow,
+]
+
+
+def sub_threat_tag(sub: SubThreat) -> str:
+    if isinstance(sub, TargetMatch):
+        return "TargetMatch"
+    if isinstance(sub, MathAlpha):
+        return "MathAlpha"
+    if isinstance(sub, WidthClass):
+        return "WidthClass"
+    if isinstance(sub, DecompositionSwap):
+        return "DecompositionSwap"
+    if isinstance(sub, CrossScriptMix):
+        return "CrossScriptMix"
+    if isinstance(sub, RestrictionLow):
+        return "RestrictionLow"
+    raise TypeError(f"sub_threat_tag: unknown SubThreat variant {sub!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    kind: ClassificationKind
+    sub: SubThreat | None
+    skeleton: list[int]
+    iterated_skeleton: list[int]
+    restriction_level: RestrictionLevel
+    matched_targets: list[str] = field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Detection
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _ascii_codepoints(s: str) -> list[int]:
+    return [ord(c) for c in s]
+
+
+def _find_target_match(
+    input_cps: list[int], iterated: list[int]
+) -> str | None:
+    for target in known_attack_targets():
+        t_cps = _ascii_codepoints(target)
+        if t_cps == input_cps:
+            continue
+        t_skel = iterated_skeleton(t_cps)
+        if t_skel == iterated:
+            return target
+    return None
+
+
+def _first_decomposition_diff_pos(
+    input_cps: list[int], nfc: list[int]
+) -> int:
+    """Precondition: ``input_cps != nfc``.  Returns the first
+    codepoint position at which the two sequences disagree, or
+    the length of the shorter sequence when the difference is a
+    tail-only extension."""
+    shorter = min(len(input_cps), len(nfc))
+    for i in range(shorter):
+        if input_cps[i] != nfc[i]:
+            return i
+    return shorter
+
+
+def detect(input_cps: list[int]) -> Verdict:
+    """Run the HomoglyphConfusable detector over a codepoint sequence."""
+    skel = skeleton(input_cps)
+    iskel = iterated_skeleton(input_cps)
+    rl = ucd.restriction_level(input_cps)
+
+    # Priority 1: target match.
+    target = _find_target_match(input_cps, iskel)
+    if target is not None:
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=TargetMatch(target=target),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+            matched_targets=[target],
+        )
+
+    # Priority 2: Math Alphanumeric.
+    math_positions = [cp for cp in input_cps if is_math_alphanumeric(cp)]
+    if math_positions:
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=MathAlpha(
+                first_cp=math_positions[0], count=len(math_positions)
+            ),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+        )
+
+    # Priority 3: Fullwidth/Halfwidth.
+    fw_positions = [cp for cp in input_cps if is_fullwidth_halfwidth(cp)]
+    if fw_positions:
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=WidthClass(
+                first_cp=fw_positions[0], count=len(fw_positions)
+            ),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+        )
+
+    # Priority 4: DecompositionSwap.
+    nfc = ucd.to_nfc(input_cps)
+    if nfc != input_cps:
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=DecompositionSwap(
+                first_diff_pos=_first_decomposition_diff_pos(input_cps, nfc)
+            ),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+        )
+
+    # Priority 5: CrossScriptMix.
+    union = ucd.string_script_union(input_cps)
+    if len(union) >= 2 and not ucd.is_highly_restrictive(input_cps):
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=CrossScriptMix(script_count=len(union)),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+        )
+
+    # Priority 6: RestrictionLow.
+    if rl in (
+        RestrictionLevel.MINIMALLY_RESTRICTIVE,
+        RestrictionLevel.UNRESTRICTED,
+    ):
+        return Verdict(
+            kind=ClassificationKind.HAZARD,
+            sub=RestrictionLow(level=rl),
+            skeleton=skel,
+            iterated_skeleton=iskel,
+            restriction_level=rl,
+        )
+
+    return Verdict(
+        kind=ClassificationKind.CLEAR,
+        sub=None,
+        skeleton=skel,
+        iterated_skeleton=iskel,
+        restriction_level=rl,
+    )
