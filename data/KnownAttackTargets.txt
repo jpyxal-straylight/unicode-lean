@@ -1,0 +1,102 @@
+# KnownAttackTargets.txt
+# Curated inventory of canonical names that have been the target
+# of typosquat / homoglyph / supply-chain impersonation attempts
+# in published security incidents.  Each row is one canonical
+# name, in the case under which the legitimate package / brand
+# ships, the HomoglyphConfusable detector uses these as the
+# "ground truth" set its confusable-skeleton match should hit.
+#
+# Curation policy: include only names with a published CVE,
+# vendor advisory, peer-reviewed-paper citation, or visible
+# typosquat campaign in the ecosystem's public-registry logs.
+# No heuristic top-N "popular packages" inclusion — those would
+# bloat the table without anchoring to a documented incident.
+#
+# Format: one canonical name per line, case preserved as the
+# legitimate package / brand publishes it; blank lines and `#`
+# lines ignored.  Per-name attribution lives in the spec doc, not
+# the data file.
+
+# Crypto / Web3 — Oct 2025 NuGet typosquat campaign plus adjacent
+# ecosystems (npm, PyPI, Solana toolchains).
+Nethereum
+ethereum
+ethers
+web3
+bitcoin
+uniswap
+metamask
+binance
+coinbase
+solana
+
+# npm — JavaScript / TypeScript ecosystem
+react
+react-dom
+next
+vue
+angular
+lodash
+express
+electron
+typescript
+webpack
+node-fetch
+discord.js
+crypto-js
+
+# PyPI — Python ecosystem
+django
+requests
+flask
+numpy
+pandas
+tensorflow
+pytorch
+matplotlib
+scipy
+beautifulsoup4
+pyyaml
+cryptography
+
+# Crates — Rust ecosystem
+serde
+tokio
+clap
+reqwest
+rand
+anyhow
+
+# RubyGems — Ruby ecosystem
+rails
+rspec
+devise
+nokogiri
+
+# Brand / domain — non-package targets (IDN homograph, billing
+# / authentication phishing, payment-rail impersonation).
+google
+amazon
+microsoft
+apple
+github
+gitlab
+bitbucket
+cloudflare
+stripe
+twilio
+paypal
+openai
+anthropic
+claude
+chatgpt
+tesla
+
+# Social platforms — credential-phishing and brand-handle
+# impersonation targets.
+twitter
+facebook
+instagram
+tiktok
+telegram
+discord

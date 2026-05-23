@@ -1,0 +1,18 @@
+[package]
+name = "unicode-rust"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Strict Unicode-as-attack-surface conformance for Rust"
+repository = "https://github.com/aiartlord/unicode-lean"
+keywords = ["unicode", "utf8", "security", "no-std-ready", "verification"]
+categories = ["text-processing", "encoding", "no-std"]
+
+[lib]
+name = "unicode_rust"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

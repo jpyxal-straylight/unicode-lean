@@ -1,0 +1,23 @@
+# Cargo build artifacts
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Editor / IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Leftover material from sibling ports / Lean reference
+.lake/
+.elan/
+*.olean
+*.ilean
+docs/
+.claude/
+.direnv/
+result
+result-*
