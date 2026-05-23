@@ -1,16 +1,3 @@
 UCD=17.0.0
 UCA=16.0.0
 PINNED=2026-05-16
-
-# unicode-hs pins to the same UCD release the sibling repo at
-# ../unicode/ validates against. Bumping this version is a two-repo
-# operation:
-#
-#   1. Update unicode-lean to the new UCD release, regenerate its
-#      Generated/ modules, confirm zero sorry/admit/axiom and full
-#      conformance against the new UCD's test fixtures.
-#   2. Update this file and unicode-hs/data/SHA256SUMS to the new
-#      bytes, regenerate any table modules, run cabal test, confirm
-#      the same conformance fixtures pass on the Haskell side.
-#
-# The two ports MUST be on the same UCD release at all times.
