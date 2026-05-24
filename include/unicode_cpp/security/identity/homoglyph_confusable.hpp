@@ -347,7 +347,11 @@ inline std::vector<std::uint32_t> letter_skeleton(
     std::vector<std::uint32_t> out;
     out.reserve(iter.size());
     for (std::uint32_t cp : iter) {
-        if (ucd::ccc(db.tables, cp) == 0) out.push_back(cp);
+        if (ucd::ccc(db.tables, cp) == 0
+            && !ucd::is_default_ignorable(db.tables, cp)
+            && !ucd::is_white_space(cp)) {
+            out.push_back(cp);
+        }
     }
     return out;
 }

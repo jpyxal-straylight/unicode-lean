@@ -108,6 +108,8 @@ struct Tables {
     std::unordered_map<std::string, std::string> script_long_to_short;
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>
         case_folding;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>>
+        default_ignorable_ranges;
 
     static Tables load_from_dir(const std::filesystem::path& dir);
     static Tables parse(
@@ -117,7 +119,8 @@ struct Tables {
         std::string_view script_extensions_text,
         std::string_view identifier_status_text,
         std::string_view property_value_aliases_text,
-        std::string_view case_folding_text);
+        std::string_view case_folding_text,
+        std::string_view derived_core_properties_text);
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -409,6 +412,23 @@ inline void parse_property_value_aliases(
     });
 }
 
+inline void parse_default_ignorable(
+    std::string_view text,
+    std::vector<std::pair<std::uint32_t, std::uint32_t>>& out) {
+    for_each_line(text, [&](std::string_view line) {
+        auto stripped = strip_comment_and_trim(line);
+        if (stripped.empty()) return;
+        std::size_t semi = stripped.find(';');
+        if (semi == std::string_view::npos) return;
+        auto prop = trim(stripped.substr(semi + 1));
+        if (prop != "Default_Ignorable_Code_Point") return;
+        auto rng = parse_range_field(stripped.substr(0, semi));
+        out.push_back({rng.first, rng.second});
+    });
+    std::sort(out.begin(), out.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+}
+
 inline void parse_case_folding(
     std::string_view text,
     std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>& out) {
@@ -466,7 +486,8 @@ inline Tables Tables::parse(
     std::string_view script_extensions_text,
     std::string_view identifier_status_text,
     std::string_view property_value_aliases_text,
-    std::string_view case_folding_text) {
+    std::string_view case_folding_text,
+    std::string_view derived_core_properties_text) {
     Tables t;
     detail::parse_unicode_data(unicode_data_text, t.ucd);
     detail::parse_composition_exclusions(
@@ -481,6 +502,8 @@ inline Tables Tables::parse(
     detail::parse_property_value_aliases(
         property_value_aliases_text, t.script_long_to_short);
     detail::parse_case_folding(case_folding_text, t.case_folding);
+    detail::parse_default_ignorable(
+        derived_core_properties_text, t.default_ignorable_ranges);
     return t;
 }
 
@@ -492,7 +515,8 @@ inline Tables Tables::load_from_dir(const std::filesystem::path& dir) {
         detail::read_file(dir / "ScriptExtensions.txt"),
         detail::read_file(dir / "IdentifierStatus.txt"),
         detail::read_file(dir / "PropertyValueAliases.txt"),
-        detail::read_file(dir / "CaseFolding.txt"));
+        detail::read_file(dir / "CaseFolding.txt"),
+        detail::read_file(dir / "DerivedCoreProperties.txt"));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -645,6 +669,48 @@ inline std::vector<std::uint32_t> to_nfd(
     auto seq = canonical_decompose(t, input);
     canonical_reorder(t, seq);
     return seq;
+}
+
+/// UAX #44 Default_Ignorable_Code_Point predicate.  True for
+/// zero-width / format-control / soft-hyphen / bidi-control /
+/// Mongolian-variation-selector / standard-variation-selector /
+/// tag-block codepoints that render as nothing.  Used by
+/// letter_skeleton in homoglyph_confusable to strip invisible
+/// insertions from typosquat comparison.
+inline bool is_default_ignorable(
+    const Tables& t, std::uint32_t cp) {
+    auto it = std::upper_bound(
+        t.default_ignorable_ranges.begin(),
+        t.default_ignorable_ranges.end(), cp,
+        [](std::uint32_t value,
+           const std::pair<std::uint32_t, std::uint32_t>& r) {
+            return value < r.first;
+        });
+    if (it != t.default_ignorable_ranges.begin()) {
+        const auto& prev = *(it - 1);
+        if (cp <= prev.second) return true;
+    }
+    return false;
+}
+
+/// UCD PropList.txt White_Space predicate.  Hardcoded match
+/// since the table is small and stable.  Includes ASCII tab /
+/// newline / space, NBSP, NNBSP (U+202F — often abused for
+/// invisibility in fonts), space-separator U+2000..U+200A,
+/// line / paragraph separators, medium math space, ideographic
+/// space.  Used by letter_skeleton to strip whitespace from
+/// typosquat comparison.
+inline constexpr bool is_white_space(std::uint32_t cp) {
+    return (cp >= 0x0009 && cp <= 0x000D)
+        || cp == 0x0020
+        || cp == 0x0085
+        || cp == 0x00A0
+        || cp == 0x1680
+        || (cp >= 0x2000 && cp <= 0x200A)
+        || (cp >= 0x2028 && cp <= 0x2029)
+        || cp == 0x202F
+        || cp == 0x205F
+        || cp == 0x3000;
 }
 
 /// Default full case folding (RFC 8265 § 5.2.4 / UCD CaseFolding.txt
