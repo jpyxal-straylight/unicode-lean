@@ -325,6 +325,33 @@ inline std::vector<std::uint32_t> iterated_skeleton(
     }
 }
 
+// Stricter "letter" skeleton — iterated_skeleton followed by removal
+// of every codepoint with canonicalCombiningClass > 0.
+//
+// Catches two adjacent classes of typosquat attack that the bare
+// §4+§5.4 skeleton misses by strict-equality test:
+//
+//   (1) base-letter+combining-mark confusables
+//       (e.g. U+0247 ɇ → e + ◌̸), and
+//   (2) cascading-substitute confusables where one substitute pass
+//       isn't enough (e.g. U+2133 ℳ → U+004D → case-fold m →
+//       requires a second substitute pass for m → rn).
+//
+// Iterating skeleton to fixed point handles class (2); filtering
+// CCC > 0 codepoints from the result handles class (1).  Used by
+// find_target_match for typosquat-style comparison; mirrors the
+// Lean Unicode.Confusables.letterSkeleton.
+inline std::vector<std::uint32_t> letter_skeleton(
+    std::span<const std::uint32_t> input, const Database& db) {
+    auto iter = iterated_skeleton(input, db);
+    std::vector<std::uint32_t> out;
+    out.reserve(iter.size());
+    for (std::uint32_t cp : iter) {
+        if (ucd::ccc(db.tables, cp) == 0) out.push_back(cp);
+    }
+    return out;
+}
+
 namespace detail {
 
 inline std::vector<std::uint32_t> ascii_codepoints(std::string_view s) {
@@ -336,17 +363,24 @@ inline std::vector<std::uint32_t> ascii_codepoints(std::string_view s) {
 
 inline std::optional<std::string> find_target_match(
     std::span<const std::uint32_t> input,
-    std::span<const std::uint32_t> iterated,
+    std::span<const std::uint32_t> /*iterated*/,
     const Database& db) {
+    // letter_skeleton strips combining marks from the §4+§5.4
+    // iterated skeleton — collapses "base letter + accent"
+    // confusables (U+0247 ɇ → e + ◌̸) and cascading-substitute
+    // confusables (U+2133 ℳ → M → case-fold m → m → rn) to the
+    // bare-letter target.  Mirrors Lean letterSkeleton.
+    auto input_letters = letter_skeleton(input, db);
     for (const auto& target : db.known_attack_targets) {
         auto t_cps = ascii_codepoints(target);
         if (t_cps.size() == input.size() &&
             std::equal(t_cps.begin(), t_cps.end(), input.begin())) {
             continue;
         }
-        auto t_skel = iterated_skeleton(t_cps, db);
-        if (t_skel.size() == iterated.size() &&
-            std::equal(t_skel.begin(), t_skel.end(), iterated.begin())) {
+        auto t_letters = letter_skeleton(t_cps, db);
+        if (t_letters.size() == input_letters.size() &&
+            std::equal(t_letters.begin(), t_letters.end(),
+                       input_letters.begin())) {
             return target;
         }
     }
