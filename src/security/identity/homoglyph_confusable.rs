@@ -229,6 +229,38 @@ fn ascii_codepoints(s: &str) -> Vec<u32> {
     s.chars().map(|c| c as u32).collect()
 }
 
+/// Constant-time u32-slice equality.  Returns 1 if equal, 0 if
+/// not, with no early break on first inequality (when lengths
+/// match).  Length-dependent branch is permitted because target
+/// names are public and input length is observable from the API.
+///
+/// Used by `find_target_match` to eliminate the timing side
+/// channel that would let an attacker fingerprint which targets
+/// are in the curated list by observing detector latency
+/// (early-match-faster-than-late-match).  Threat model: a caller
+/// (e.g. an LLM tokenizer gateway, an HFT order-validation hook)
+/// processes many adversary-controlled inputs and measures
+/// detector response time; constant-time match prevents the
+/// observable per-target work from leaking list membership.
+fn ct_u32_slice_eq(a: &[u32], b: &[u32]) -> u32 {
+    if a.len() != b.len() {
+        return 0;
+    }
+    let mut acc: u32 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        acc |= x ^ y;
+    }
+    // acc == 0 iff all bytes equal.  Collapse to 1 / 0 without
+    // a comparison branch.
+    let mut z = acc;
+    z |= z.wrapping_shr(16);
+    z |= z.wrapping_shr(8);
+    z |= z.wrapping_shr(4);
+    z |= z.wrapping_shr(2);
+    z |= z.wrapping_shr(1);
+    1u32 - (z & 1)
+}
+
 fn find_target_match(
     input: &[u32], _iterated: &[u32],
 ) -> Option<String> {
@@ -237,18 +269,33 @@ fn find_target_match(
     // (U+0247 ɇ → e + ◌̸, U+0266 ɦ → h + ◌̔, etc.) collapse to the
     // bare-letter target.  Mirrors the Lean
     // `Unicode.Confusables.letterSkeleton` primitive.
+    //
+    // Constant-time discipline (Move 4 of the state-level red-team
+    // plan): walk the entire curated target list every call.  No
+    // early break on first match.  Equality via ct_u32_slice_eq.
+    // The first-match index is captured but the loop continues to
+    // completion, so the per-target work is independent of input.
     let input_letters = letter_skeleton(input);
-    for target in known_attack_targets() {
+    let targets = known_attack_targets();
+    let mut first_match: Option<usize> = None;
+    for (idx, target) in targets.iter().enumerate() {
         let t_cps = ascii_codepoints(target);
         if t_cps == input {
+            // Self-match guard — input is literally the target.
+            // Permitted branch because legitimate registration of
+            // a curated name is a recognised public case.
             continue;
         }
         let t_letters = letter_skeleton(&t_cps);
-        if t_letters == input_letters {
-            return Some(target.clone());
+        let is_match = ct_u32_slice_eq(&t_letters, &input_letters) == 1;
+        // Capture FIRST match index but DO NOT break — the rest
+        // of the loop must run regardless of input to keep total
+        // work independent of which target (if any) fires.
+        if is_match && first_match.is_none() {
+            first_match = Some(idx);
         }
     }
-    None
+    first_match.map(|i| targets[i].clone())
 }
 
 /// First codepoint position at which `input` and its NFC form
