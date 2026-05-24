@@ -148,6 +148,29 @@ pub fn iterated_skeleton(input: &[u32]) -> Vec<u32> {
     }
 }
 
+/// Stricter "letter" skeleton — `iterated_skeleton` followed by
+/// removal of every codepoint with `canonicalCombiningClass > 0`.
+///
+/// Uses `iterated_skeleton` (not single-pass `skeleton`) so that
+/// confusables whose substitution produces an uppercase letter
+/// — e.g. U+2133 ℳ → 004D M (capital), case-folded to 006D m,
+/// then the m→rn confusable applies on the next pass — fully
+/// reduce to the canonical fixed point.  Then strips combining
+/// marks to catch base-letter+combining-mark confusables
+/// (U+0247 ɇ → e + ◌̸, etc).
+///
+/// Mirrors the Lean `Unicode.Confusables.letterSkeleton`
+/// primitive (note: the Lean version uses single-pass skeleton
+/// today; the rust-port uses iterated to close the U+2133-class
+/// hole surfaced by mutation testing — to be promoted to the
+/// Lean reference in a follow-up).
+pub fn letter_skeleton(input: &[u32]) -> Vec<u32> {
+    iterated_skeleton(input)
+        .into_iter()
+        .filter(|&cp| ucd::ccc(cp) == 0)
+        .collect()
+}
+
 /// True iff `cp` is in the Mathematical Alphanumeric Symbols
 /// block (U+1D400..U+1D7FF).  These render as italic / bold /
 /// fraktur / script / sans-serif / double-struck Latin and
@@ -200,15 +223,21 @@ fn ascii_codepoints(s: &str) -> Vec<u32> {
 }
 
 fn find_target_match(
-    input: &[u32], iterated: &[u32],
+    input: &[u32], _iterated: &[u32],
 ) -> Option<String> {
+    // letter_skeleton strips combining marks from the §4+§5.4
+    // skeleton output so that "base letter + accent" confusables
+    // (U+0247 ɇ → e + ◌̸, U+0266 ɦ → h + ◌̔, etc.) collapse to the
+    // bare-letter target.  Mirrors the Lean
+    // `Unicode.Confusables.letterSkeleton` primitive.
+    let input_letters = letter_skeleton(input);
     for target in known_attack_targets() {
         let t_cps = ascii_codepoints(target);
         if t_cps == input {
             continue;
         }
-        let t_skel = iterated_skeleton(&t_cps);
-        if t_skel == iterated {
+        let t_letters = letter_skeleton(&t_cps);
+        if t_letters == input_letters {
             return Some(target.clone());
         }
     }
