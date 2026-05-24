@@ -299,24 +299,61 @@ def _ascii_codepoints(s: str) -> list[int]:
     return [ord(c) for c in s]
 
 
+def _ct_slice_eq(a: list[int], b: list[int]) -> int:
+    """Constant-time int-list equality.  Returns 1 if equal, 0 if
+    not.  No early break on first inequality (when lengths match).
+    Length-dependent branch is permitted because target names are
+    public and input length is observable from the API.
+
+    Used by `_find_target_match` to eliminate the timing side
+    channel that would let an attacker fingerprint the curated
+    target list by observing detector latency.
+    """
+    if len(a) != len(b):
+        return 0
+    acc = 0
+    for x, y in zip(a, b):
+        acc |= x ^ y
+    # acc == 0 iff all elements equal — collapse to 0/1 without
+    # a comparison branch.  Mask to 32 bits since we accumulate
+    # u32 codepoints; Python ints are bignum but the relevant
+    # bits are confined.
+    z = acc & 0xFFFFFFFF
+    z |= z >> 16
+    z |= z >> 8
+    z |= z >> 4
+    z |= z >> 2
+    z |= z >> 1
+    return 1 - (z & 1)
+
+
 def _find_target_match(
     input_cps: list[int], _iterated: list[int]
 ) -> str | None:
-    """letter_skeleton strips combining marks from the §4+§5.4
-    iterated skeleton so that "base letter + accent" confusables
-    (U+0247 ɇ, U+0266 ɦ, etc.) and cascading-substitute confusables
-    (U+2133 ℳ via M → m → rn) collapse to the bare-letter target.
-    Mirrors the Lean ``Unicode.Confusables.letterSkeleton`` primitive.
+    """Constant-time variant of target match (Move 4 of state-level
+    red-team plan).  Walks the entire curated target list every
+    call; captures FIRST matching index but continues iterating to
+    completion.  letter_skeleton handles combining-mark + cascading-
+    substitute confusables (Hole 4) and Default_Ignorable + White_Space
+    invisible insertion (Hole 5).
     """
     input_letters = letter_skeleton(input_cps)
-    for target in known_attack_targets():
+    targets = known_attack_targets()
+    first_match: int | None = None
+    for idx, target in enumerate(targets):
         t_cps = _ascii_codepoints(target)
         if t_cps == input_cps:
+            # Self-match guard — input is literally the target.
             continue
         t_letters = letter_skeleton(t_cps)
-        if t_letters == input_letters:
-            return target
-    return None
+        is_match = _ct_slice_eq(t_letters, input_letters) == 1
+        # Capture first match index but do NOT break — keep loop
+        # work independent of which target (if any) fires.
+        if is_match and first_match is None:
+            first_match = idx
+    if first_match is None:
+        return None
+    return targets[first_match]
 
 
 def _first_decomposition_diff_pos(
