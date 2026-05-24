@@ -1,0 +1,82 @@
+name: cpp-port CI
+
+on:
+  push:
+    branches: [cpp-port]
+  pull_request:
+    branches: [cpp-port]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cpp-port
+
+      - name: Install compilers + cmake
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            g++ clang++ cmake ninja-build
+
+      - name: Configure (${{ matrix.cxx }} + tests)
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: cmake -S . -B build -DUNICODE_CPP_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --target unicode_cpp_tests
+
+      - name: Run doctest (124 cases, 517 assertions)
+        run: build/test/unicode_cpp_tests
+
+  sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cpp-port
+
+      - name: Install clang + cmake
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang cmake
+
+      - name: Generate /tmp/diff_corpus.jsonl (small variant — no rust)
+        run: |
+          # Emit a self-generated 1000-entry corpus for sanitizer use.
+          # CI doesn't need the full 100k for the sanitizer pass.
+          python3 - <<'PY'
+          import json, random
+          random.seed(0xC0FFEE)
+          with open('/tmp/diff_corpus.jsonl', 'w') as f:
+              for i in range(1000):
+                  n = random.randint(0, 32)
+                  cps = [random.randint(0, 0x10FFFF) for _ in range(n)]
+                  cps = [c for c in cps if not 0xD800 <= c <= 0xDFFF]
+                  f.write(json.dumps({"id": i, "cps": cps}) + "\n")
+          PY
+
+      - name: Run ASAN + UBSAN sanitizer pass
+        run: ./scripts/sanitizer.sh
+
+  hardening-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cpp-port
+      - name: data-integrity gate (SHA-pin verification)
+        run: ./scripts/check-ucd-hashes.sh
+      - name: reject reinterpret_cast / const_cast / unsafe casts
+        run: |
+          if grep -rE 'reinterpret_cast|const_cast' include/ test/ tools/; then
+            echo "FATAL: unsafe-cast found"
+            exit 1
+          fi
+          echo "clean: no reinterpret_cast / const_cast"
