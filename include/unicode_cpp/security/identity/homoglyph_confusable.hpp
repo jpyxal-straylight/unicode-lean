@@ -365,28 +365,66 @@ inline std::vector<std::uint32_t> ascii_codepoints(std::string_view s) {
     return out;
 }
 
+// Constant-time u32-slice equality.  Returns 1 if equal, 0 if
+// not, with no early break on first inequality (when lengths
+// match).  Length-dependent branch is permitted because target
+// names are public and input length is observable from the API.
+//
+// Used by find_target_match to eliminate the timing side channel
+// that would let an attacker fingerprint the curated target list
+// by observing detector latency.
+inline std::uint32_t ct_u32_slice_eq(
+    const std::vector<std::uint32_t>& a,
+    std::span<const std::uint32_t> b) {
+    if (a.size() != b.size()) return 0;
+    std::uint32_t acc = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        acc |= a[i] ^ b[i];
+    }
+    std::uint32_t z = acc;
+    z |= z >> 16;
+    z |= z >> 8;
+    z |= z >> 4;
+    z |= z >> 2;
+    z |= z >> 1;
+    return 1u - (z & 1u);
+}
+
 inline std::optional<std::string> find_target_match(
     std::span<const std::uint32_t> input,
     std::span<const std::uint32_t> /*iterated*/,
     const Database& db) {
-    // letter_skeleton strips combining marks from the §4+§5.4
-    // iterated skeleton — collapses "base letter + accent"
-    // confusables (U+0247 ɇ → e + ◌̸) and cascading-substitute
-    // confusables (U+2133 ℳ → M → case-fold m → m → rn) to the
-    // bare-letter target.  Mirrors Lean letterSkeleton.
+    // Constant-time discipline (Move 4 of state-level red-team
+    // plan): walk the entire curated target list every call.
+    // No early break on first match.  Equality via
+    // ct_u32_slice_eq.  Per-target work is independent of input.
+    //
+    // letter_skeleton handles combining-mark + cascading-substitute
+    // confusables (Hole 4) and Default_Ignorable + White_Space
+    // invisible insertion (Hole 5).  Mirrors Lean letterSkeleton.
     auto input_letters = letter_skeleton(input, db);
-    for (const auto& target : db.known_attack_targets) {
+    std::optional<std::size_t> first_match;
+    for (std::size_t idx = 0; idx < db.known_attack_targets.size(); ++idx) {
+        const auto& target = db.known_attack_targets[idx];
         auto t_cps = ascii_codepoints(target);
+        // Self-match guard — input is literally the target.
+        // Permitted branch (legitimate registration case).
         if (t_cps.size() == input.size() &&
             std::equal(t_cps.begin(), t_cps.end(), input.begin())) {
             continue;
         }
         auto t_letters = letter_skeleton(t_cps, db);
-        if (t_letters.size() == input_letters.size() &&
-            std::equal(t_letters.begin(), t_letters.end(),
-                       input_letters.begin())) {
-            return target;
+        std::uint32_t letters_eq = ct_u32_slice_eq(
+            t_letters,
+            std::span<const std::uint32_t>(input_letters));
+        // Capture FIRST matching index but do NOT break — keep
+        // loop work independent of which target (if any) fires.
+        if (letters_eq == 1u && !first_match.has_value()) {
+            first_match = idx;
         }
+    }
+    if (first_match.has_value()) {
+        return db.known_attack_targets[*first_match];
     }
     return std::nullopt;
 }
