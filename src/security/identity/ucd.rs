@@ -20,6 +20,8 @@ const IDENTIFIER_STATUS_RAW: &str =
     include_str!("../../../data/IdentifierStatus.txt");
 const PROPERTY_VALUE_ALIASES_RAW: &str =
     include_str!("../../../data/PropertyValueAliases.txt");
+const DERIVED_CORE_PROPERTIES_RAW: &str =
+    include_str!("../../../data/DerivedCoreProperties.txt");
 
 fn parse_hex(s: &str) -> Option<u32> {
     u32::from_str_radix(s.trim(), 16).ok()
@@ -617,6 +619,83 @@ pub fn is_id_allowed(cp: u32) -> bool {
         }
     }
     false
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// DerivedCoreProperties.txt — Default_Ignorable_Code_Point ranges
+// ─────────────────────────────────────────────────────────────────────
+
+fn parse_default_ignorable() -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for line in DERIVED_CORE_PROPERTIES_RAW.lines() {
+        let stripped = strip_comment_and_trim(line);
+        if stripped.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = stripped.splitn(2, ';').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        if parts[1].trim() != "Default_Ignorable_Code_Point" {
+            continue;
+        }
+        if let Some((start, end)) = parse_range_field(parts[0]) {
+            out.push((start, end));
+        }
+    }
+    out.sort_by_key(|r| r.0);
+    out
+}
+
+fn default_ignorable_ranges() -> &'static Vec<(u32, u32)> {
+    static T: OnceLock<Vec<(u32, u32)>> = OnceLock::new();
+    T.get_or_init(parse_default_ignorable)
+}
+
+/// True iff `cp` has the `Default_Ignorable_Code_Point` derived
+/// property per UAX #44.  Includes the zero-width / format-control
+/// characters (ZWSP, ZWNJ, ZWJ, WJ, BOM, soft hyphen, bidi
+/// embedding controls, Mongolian / variation selectors, the tag
+/// block, etc.) — codepoints that render as nothing and which an
+/// attacker can insert into a target name without changing the
+/// visible glyph stream.  Used by `letter_skeleton` in
+/// homoglyph_confusable to close the invisible-insertion bypass.
+pub fn is_default_ignorable(cp: u32) -> bool {
+    let table = default_ignorable_ranges();
+    let idx = table.partition_point(|r| r.0 <= cp);
+    if idx > 0 {
+        let entry = &table[idx - 1];
+        if cp <= entry.1 {
+            return true;
+        }
+    }
+    false
+}
+
+/// True iff `cp` is a whitespace codepoint per UCD PropList.txt
+/// `White_Space` property.  Includes ASCII tab/newline/space,
+/// no-break space (U+00A0), narrow no-break space (U+202F —
+/// frequently abused for invisibility-in-fonts), the
+/// space-separator block U+2000..U+200A, line/paragraph
+/// separators, medium math space (U+205F), and ideographic space
+/// (U+3000).  Hardcoded since the table is small and stable.
+///
+/// Used by `letter_skeleton` to strip whitespace from typosquat
+/// comparison — whitespace inside an identifier is universally
+/// attacker abuse, never legitimate.
+pub fn is_white_space(cp: u32) -> bool {
+    matches!(cp,
+        0x0009..=0x000D
+      | 0x0020
+      | 0x0085
+      | 0x00A0
+      | 0x1680
+      | 0x2000..=0x200A
+      | 0x2028..=0x2029
+      | 0x202F
+      | 0x205F
+      | 0x3000
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────

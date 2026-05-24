@@ -149,25 +149,32 @@ pub fn iterated_skeleton(input: &[u32]) -> Vec<u32> {
 }
 
 /// Stricter "letter" skeleton — `iterated_skeleton` followed by
-/// removal of every codepoint with `canonicalCombiningClass > 0`.
+/// removal of (a) every codepoint with `canonicalCombiningClass > 0`
+/// AND (b) every codepoint with the `Default_Ignorable_Code_Point`
+/// derived property.
 ///
-/// Uses `iterated_skeleton` (not single-pass `skeleton`) so that
-/// confusables whose substitution produces an uppercase letter
-/// — e.g. U+2133 ℳ → 004D M (capital), case-folded to 006D m,
-/// then the m→rn confusable applies on the next pass — fully
-/// reduce to the canonical fixed point.  Then strips combining
-/// marks to catch base-letter+combining-mark confusables
-/// (U+0247 ɇ → e + ◌̸, etc).
+/// Catches three adjacent classes of typosquat attack that the
+/// bare §4+§5.4 skeleton misses by strict-equality test:
+///   1. base-letter + combining-mark confusables
+///      (e.g. U+0247 ɇ → e + ◌̸),
+///   2. cascading-substitute confusables
+///      (e.g. U+2133 ℳ → M → case-fold m → m → rn — needs iter),
+///   3. invisible-codepoint insertion
+///      (ZWSP / ZWNJ / ZWJ / WJ / BOM / NNBSP / soft hyphen /
+///       bidi controls / Mongolian / variation selectors / tag
+///       block — CCC = 0 so survive the combining-mark strip but
+///       Default_Ignorable so this stricter filter catches them).
 ///
 /// Mirrors the Lean `Unicode.Confusables.letterSkeleton`
-/// primitive (note: the Lean version uses single-pass skeleton
-/// today; the rust-port uses iterated to close the U+2133-class
-/// hole surfaced by mutation testing — to be promoted to the
-/// Lean reference in a follow-up).
+/// primitive.
 pub fn letter_skeleton(input: &[u32]) -> Vec<u32> {
     iterated_skeleton(input)
         .into_iter()
-        .filter(|&cp| ucd::ccc(cp) == 0)
+        .filter(|&cp| {
+            ucd::ccc(cp) == 0
+                && !ucd::is_default_ignorable(cp)
+                && !ucd::is_white_space(cp)
+        })
         .collect()
 }
 
