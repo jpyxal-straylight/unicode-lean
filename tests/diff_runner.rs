@@ -35,7 +35,7 @@ const CORPUS_PATH: &str = "/tmp/diff_corpus.jsonl";
 // ──────────────────────────────────────────────────────────────────────
 
 const SEED: u64 = 0xC0FFEE_1234_5678;
-const N_INPUTS: usize = 10_000;
+const N_INPUTS: usize = 100_000;
 const MAX_LEN: usize = 32;
 
 struct Xorshift(u64);
