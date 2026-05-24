@@ -40,13 +40,63 @@
 
 namespace unicode_cpp::security::zero_width_payload {
 
+// Sibling-detector codepoint ranges — these ARE
+// Default_Ignorable per UAX #44 but are dispatched by their own
+// family detector for richer payload-decoding / bidi-stack
+// tracking, so we EXCLUDE them from the ZW set to avoid
+// double-counting.
+//
+//   U+FE00..U+FE0F     VariationSelectorPayload
+//   U+E0100..U+E01EF   VariationSelectorPayload
+//   U+E0000..U+E007F   TagBlockPayload
+//   U+202A..U+202E     BidiControlBalance (LRE/RLE/PDF/LRO/RLO)
+//   U+2066..U+2069     BidiControlBalance (LRI/RLI/FSI/PDI)
+//
+// LRM / RLM (U+200E / U+200F) are NOT excluded — they're
+// direction markers, not push/pop bidi controls.
+constexpr bool is_sibling_handled(std::uint32_t cp) {
+    return (cp >= 0xFE00u && cp <= 0xFE0Fu)
+        || (cp >= 0xE0100u && cp <= 0xE01EFu)
+        || (cp >= 0xE0000u && cp <= 0xE007Fu)
+        || (cp >= 0x202Au && cp <= 0x202Eu)
+        || (cp >= 0x2066u && cp <= 0x2069u);
+}
+
+// UAX #44 Default_Ignorable_Code_Point — hardcoded ranges per
+// UCD 17.0.0 DerivedCoreProperties.txt.  Stable across Unicode
+// versions; updates require bumping the UCD pin and re-verifying
+// this table against the new DerivedCoreProperties.txt.
+constexpr bool is_default_ignorable(std::uint32_t cp) {
+    return cp == 0x00ADu
+        || cp == 0x034Fu
+        || cp == 0x061Cu
+        || (cp >= 0x115Fu && cp <= 0x1160u)
+        || (cp >= 0x17B4u && cp <= 0x17B5u)
+        || (cp >= 0x180Bu && cp <= 0x180Fu)
+        || (cp >= 0x200Bu && cp <= 0x200Fu)
+        || (cp >= 0x202Au && cp <= 0x202Eu)
+        || (cp >= 0x2060u && cp <= 0x206Fu)
+        || cp == 0x3164u
+        || (cp >= 0xFE00u && cp <= 0xFE0Fu)
+        || cp == 0xFEFFu
+        || cp == 0xFFA0u
+        || (cp >= 0xFFF0u && cp <= 0xFFF8u)
+        || (cp >= 0x1BCA0u && cp <= 0x1BCA3u)
+        || (cp >= 0x1D173u && cp <= 0x1D17Au)
+        || (cp >= 0xE0000u && cp <= 0xE0FFFu);
+}
+
 constexpr bool is_zero_width(std::uint32_t cp) {
+    // Explicit historical set — preserves sub-threat dispatch.
     if (cp == 0x200Bu || cp == 0x200Cu || cp == 0x200Du ||
         cp == 0x200Eu || cp == 0x200Fu) return true;
     if (cp >= 0x2060u && cp <= 0x2064u) return true;
     if (cp == 0x202Fu) return true;
     if (cp == 0xFEFFu) return true;
     if (cp >= 0xFFF9u && cp <= 0xFFFBu) return true;
+    // UAX #44 Default_Ignorable — catches every other invisible
+    // codepoint, modulo sibling-detector ranges.
+    if (is_default_ignorable(cp) && !is_sibling_handled(cp)) return true;
     return false;
 }
 
