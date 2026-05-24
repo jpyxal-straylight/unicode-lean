@@ -24,9 +24,13 @@
 #define UNICODE_CPP_SECURITY_VARIATION_SELECTOR_PAYLOAD_HPP
 
 #include <cstdint>
+#include <fstream>
 #include <optional>
+#include <set>
 #include <span>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -126,6 +130,55 @@ inline std::string lossy_ascii(std::span<const std::uint8_t> bytes) {
     return s;
 }
 
+// Parse StandardizedVariants.txt + emoji-variation-sequences.txt
+// at first use from data/ relative to cwd.  Cached for subsequent
+// calls.  Falls back to empty set if files missing (legacy
+// no-exemption behavior — preserves backwards compat).
+inline const std::set<std::pair<std::uint32_t, std::uint32_t>>&
+load_legal_variation_pairs() {
+    static const auto pairs =
+        []() -> std::set<std::pair<std::uint32_t, std::uint32_t>> {
+            std::set<std::pair<std::uint32_t, std::uint32_t>> result;
+            for (const char* fname : {
+                "data/StandardizedVariants.txt",
+                "data/emoji-variation-sequences.txt",
+            }) {
+                std::ifstream f(fname);
+                if (!f) continue;
+                std::string line;
+                while (std::getline(f, line)) {
+                    auto hash_pos = line.find('#');
+                    if (hash_pos != std::string::npos) {
+                        line.erase(hash_pos);
+                    }
+                    auto semi_pos = line.find(';');
+                    if (semi_pos != std::string::npos) {
+                        line.erase(semi_pos);
+                    }
+                    std::istringstream iss(line);
+                    std::string base_tok, vs_tok;
+                    if (!(iss >> base_tok >> vs_tok)) continue;
+                    try {
+                        std::uint32_t base = static_cast<std::uint32_t>(
+                            std::stoul(base_tok, nullptr, 16));
+                        std::uint32_t vs = static_cast<std::uint32_t>(
+                            std::stoul(vs_tok, nullptr, 16));
+                        result.insert({base, vs});
+                    } catch (...) {
+                        // ignore malformed lines
+                    }
+                }
+            }
+            return result;
+        }();
+    return pairs;
+}
+
+inline bool is_registered_variation_pair(
+    std::uint32_t base, std::uint32_t vs) {
+    return load_legal_variation_pairs().contains({base, vs});
+}
+
 }  // namespace detail
 
 inline Verdict detect(std::span<const std::uint32_t> input) {
@@ -141,6 +194,19 @@ inline Verdict detect(std::span<const std::uint32_t> input) {
     }
 
     v.recovered_bytes = detail::decode_vs_run(input, v.vs_positions);
+
+    // Single-VS exemption: if exactly one VS follows a base AND the
+    // (base, VS) pair is registered in StandardizedVariants or
+    // emoji-variation-sequences, return Clear (legitimate variant).
+    if (v.vs_positions.size() == 1) {
+        std::size_t p = v.vs_positions[0];
+        if (p > 0 && detail::is_registered_variation_pair(
+                         input[p - 1], input[p])) {
+            v.kind = ClassificationKind::Clear;
+            return v;
+        }
+    }
+
     v.kind = ClassificationKind::Hazard;
 
     // Priority: repeated-VS run > direct payload > illegal target.
