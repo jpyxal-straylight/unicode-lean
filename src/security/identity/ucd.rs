@@ -314,6 +314,75 @@ pub fn to_nfc(input: &[u32]) -> Vec<u32> {
     canonical_compose(&nfd)
 }
 
+/// UAX #15 NFD — canonical decompose + canonical reorder, without
+/// the recomposition pass.  Required by the UTS #39 §4 +§5.4
+/// confusable-skeleton bracket.
+pub fn to_nfd(input: &[u32]) -> Vec<u32> {
+    let mut seq = canonical_decompose(input);
+    canonical_reorder(&mut seq);
+    seq
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CaseFolding.txt — default full case folding (RFC 8265 § 5.2.4)
+// ─────────────────────────────────────────────────────────────────────
+
+const CASE_FOLDING_RAW: &str =
+    include_str!("../../../data/CaseFolding.txt");
+
+fn parse_case_folding() -> HashMap<u32, Vec<u32>> {
+    let mut out = HashMap::new();
+    for line in CASE_FOLDING_RAW.lines() {
+        let stripped = strip_comment_and_trim(line);
+        if stripped.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = stripped.split(';').map(str::trim).collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let status = parts[1];
+        // UCD CaseFolding.txt: keep only status C (Common) and F (Full)
+        // entries — the union RFC 8265 § 5.2.4 calls "default full case
+        // folding".  Status S (Simple) is redundant with C/F, status T
+        // is Turkic-locale-specific.
+        if status != "C" && status != "F" {
+            continue;
+        }
+        let src = match parse_hex(parts[0]) {
+            Some(s) => s,
+            None => continue,
+        };
+        let tgt: Vec<u32> =
+            parts[2].split_whitespace().filter_map(parse_hex).collect();
+        if tgt.is_empty() {
+            continue;
+        }
+        out.insert(src, tgt);
+    }
+    out
+}
+
+fn case_folding_table() -> &'static HashMap<u32, Vec<u32>> {
+    static T: OnceLock<HashMap<u32, Vec<u32>>> = OnceLock::new();
+    T.get_or_init(parse_case_folding)
+}
+
+/// Default full case folding of a codepoint sequence per
+/// RFC 8265 § 5.2.4 / UCD CaseFolding.txt status C ∪ F.
+/// Codepoints absent from the table fold to themselves.
+pub fn case_fold(input: &[u32]) -> Vec<u32> {
+    let table = case_folding_table();
+    let mut out = Vec::with_capacity(input.len());
+    for &cp in input {
+        match table.get(&cp) {
+            Some(replacement) => out.extend_from_slice(replacement),
+            None => out.push(cp),
+        }
+    }
+    out
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Scripts.txt — codepoint → primary script
 // ─────────────────────────────────────────────────────────────────────

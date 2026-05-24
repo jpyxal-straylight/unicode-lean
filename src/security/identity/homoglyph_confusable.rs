@@ -102,10 +102,11 @@ fn known_attack_targets() -> &'static Vec<String> {
     })
 }
 
-/// One application of the UTS #39 confusable mapping.  Each
-/// codepoint is replaced by its skeleton image (if present in
-/// the confusables map) or by itself (if absent).
-pub fn skeleton(input: &[u32]) -> Vec<u32> {
+/// Inner substitution step of the UTS #39 skeleton — replaces
+/// each codepoint by its confusables target sequence (codepoints
+/// absent from the table are kept).  Not the full skeleton; the
+/// case-folded NFD bracket is applied by `skeleton`.
+fn substitute(input: &[u32]) -> Vec<u32> {
     let map = confusables_map();
     let mut out = Vec::with_capacity(input.len());
     for &cp in input {
@@ -115,6 +116,23 @@ pub fn skeleton(input: &[u32]) -> Vec<u32> {
         }
     }
     out
+}
+
+/// The case-insensitive confusables skeleton per UTS #39 §4 + §5.4:
+///
+///     skeleton(X) = toNFD(caseFold(substitute(caseFold(toNFD(X)))))
+///
+/// Bracketing case folding inside the NFD passes lets the detector
+/// collapse case-variant typosquats on case-insensitive registries
+/// (npm / PyPI / NuGet package IDs, IDN labels) to a single
+/// canonical representative.  Mirrors the Lean
+/// `Unicode.Confusables.skeleton` definition.
+pub fn skeleton(input: &[u32]) -> Vec<u32> {
+    let step1 = ucd::to_nfd(input);
+    let step2 = ucd::case_fold(&step1);
+    let step3 = substitute(&step2);
+    let step4 = ucd::case_fold(&step3);
+    ucd::to_nfd(&step4)
 }
 
 /// Apply `skeleton` until a fixed point is reached.  In practice
