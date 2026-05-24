@@ -106,6 +106,8 @@ struct Tables {
     std::vector<RangeEntry<std::vector<std::string>>> script_extensions;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> id_allowed_ranges;
     std::unordered_map<std::string, std::string> script_long_to_short;
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>
+        case_folding;
 
     static Tables load_from_dir(const std::filesystem::path& dir);
     static Tables parse(
@@ -114,7 +116,8 @@ struct Tables {
         std::string_view scripts_text,
         std::string_view script_extensions_text,
         std::string_view identifier_status_text,
-        std::string_view property_value_aliases_text);
+        std::string_view property_value_aliases_text,
+        std::string_view case_folding_text);
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -406,6 +409,54 @@ inline void parse_property_value_aliases(
     });
 }
 
+inline void parse_case_folding(
+    std::string_view text,
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>& out) {
+    for_each_line(text, [&](std::string_view line) {
+        auto stripped = strip_comment_and_trim(line);
+        if (stripped.empty()) return;
+        // Up to 4 fields: codepoint ; status ; mapping ; name
+        std::array<std::string_view, 4> fields{};
+        std::size_t field_count = 0;
+        std::size_t start = 0;
+        for (std::size_t i = 0; i <= stripped.size(); ++i) {
+            if (i == stripped.size() || stripped[i] == ';') {
+                if (field_count < fields.size()) {
+                    fields[field_count++] =
+                        stripped.substr(start, i - start);
+                }
+                start = i + 1;
+            }
+        }
+        if (field_count < 3) return;
+        auto status = trim(fields[1]);
+        // UCD CaseFolding.txt — keep only status C (Common) and F
+        // (Full) entries.  S is redundant with C/F; T is Turkic-
+        // locale-specific.  Together C ∪ F is RFC 8265 § 5.2.4
+        // "default full case folding".
+        if (status != "C" && status != "F") return;
+        auto src = parse_hex_u32(trim(fields[0]));
+        if (!src) return;
+        std::vector<std::uint32_t> tgt;
+        std::string_view mapping = trim(fields[2]);
+        std::size_t tok_start = 0;
+        for (std::size_t i = 0; i <= mapping.size(); ++i) {
+            if (i == mapping.size()
+                || std::isspace(
+                    static_cast<unsigned char>(mapping[i]))) {
+                if (i > tok_start) {
+                    auto tok = mapping.substr(tok_start, i - tok_start);
+                    if (auto v = parse_hex_u32(tok)) tgt.push_back(*v);
+                }
+                tok_start = i + 1;
+            }
+        }
+        if (!tgt.empty()) {
+            out.emplace(*src, std::move(tgt));
+        }
+    });
+}
+
 }  // namespace detail
 
 inline Tables Tables::parse(
@@ -414,7 +465,8 @@ inline Tables Tables::parse(
     std::string_view scripts_text,
     std::string_view script_extensions_text,
     std::string_view identifier_status_text,
-    std::string_view property_value_aliases_text) {
+    std::string_view property_value_aliases_text,
+    std::string_view case_folding_text) {
     Tables t;
     detail::parse_unicode_data(unicode_data_text, t.ucd);
     detail::parse_composition_exclusions(
@@ -428,6 +480,7 @@ inline Tables Tables::parse(
         identifier_status_text, t.id_allowed_ranges);
     detail::parse_property_value_aliases(
         property_value_aliases_text, t.script_long_to_short);
+    detail::parse_case_folding(case_folding_text, t.case_folding);
     return t;
 }
 
@@ -438,7 +491,8 @@ inline Tables Tables::load_from_dir(const std::filesystem::path& dir) {
         detail::read_file(dir / "Scripts.txt"),
         detail::read_file(dir / "ScriptExtensions.txt"),
         detail::read_file(dir / "IdentifierStatus.txt"),
-        detail::read_file(dir / "PropertyValueAliases.txt"));
+        detail::read_file(dir / "PropertyValueAliases.txt"),
+        detail::read_file(dir / "CaseFolding.txt"));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -581,6 +635,34 @@ inline std::vector<std::uint32_t> to_nfc(
     auto seq = canonical_decompose(t, input);
     canonical_reorder(t, seq);
     return canonical_compose(t, seq);
+}
+
+/// UAX #15 NFD — canonical decompose + canonical reorder, without
+/// the recomposition pass.  Required by the UTS #39 §4 + §5.4
+/// confusable-skeleton bracket.
+inline std::vector<std::uint32_t> to_nfd(
+    const Tables& t, std::span<const std::uint32_t> input) {
+    auto seq = canonical_decompose(t, input);
+    canonical_reorder(t, seq);
+    return seq;
+}
+
+/// Default full case folding (RFC 8265 § 5.2.4 / UCD CaseFolding.txt
+/// status C ∪ F) of a codepoint sequence.  Codepoints absent from
+/// the table fold to themselves.
+inline std::vector<std::uint32_t> case_fold(
+    const Tables& t, std::span<const std::uint32_t> input) {
+    std::vector<std::uint32_t> out;
+    out.reserve(input.size());
+    for (std::uint32_t cp : input) {
+        auto it = t.case_folding.find(cp);
+        if (it == t.case_folding.end()) {
+            out.push_back(cp);
+        } else {
+            for (std::uint32_t r : it->second) out.push_back(r);
+        }
+    }
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────

@@ -276,10 +276,11 @@ inline Database Database::load_from_dir(
     return parse(conf, targ, ucd::Tables::load_from_dir(dir));
 }
 
-// One application of the UTS #39 confusable mapping.  Each
-// codepoint is replaced by its skeleton image (if present in
-// the confusables map) or by itself (if absent).
-inline std::vector<std::uint32_t> skeleton(
+// Inner substitution step of the UTS #39 skeleton — replaces each
+// codepoint by its confusables target sequence (codepoints absent
+// from the table are kept).  Not the full skeleton; the case-folded
+// NFD bracket is applied by `skeleton`.
+inline std::vector<std::uint32_t> substitute(
     std::span<const std::uint32_t> input, const Database& db) {
     std::vector<std::uint32_t> out;
     out.reserve(input.size());
@@ -292,6 +293,24 @@ inline std::vector<std::uint32_t> skeleton(
         }
     }
     return out;
+}
+
+// The case-insensitive confusables skeleton per UTS #39 §4 + §5.4:
+//
+//     skeleton(X) = toNFD(caseFold(substitute(caseFold(toNFD(X)))))
+//
+// Bracketing case folding inside the NFD passes lets the detector
+// collapse case-variant typosquats on case-insensitive registries
+// (npm / PyPI / NuGet package IDs, IDN labels) to a single canonical
+// representative.  Mirrors the Lean `Unicode.Confusables.skeleton`
+// definition.
+inline std::vector<std::uint32_t> skeleton(
+    std::span<const std::uint32_t> input, const Database& db) {
+    auto step1 = ucd::to_nfd(db.tables, input);
+    auto step2 = ucd::case_fold(db.tables, step1);
+    auto step3 = substitute(step2, db);
+    auto step4 = ucd::case_fold(db.tables, step3);
+    return ucd::to_nfd(db.tables, step4);
 }
 
 // Apply skeleton until a fixed point.  In practice 1–3 iterations
