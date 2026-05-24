@@ -178,6 +178,27 @@ def iterated_skeleton(input_cps: list[int]) -> list[int]:
         current = nxt
 
 
+def letter_skeleton(input_cps: list[int]) -> list[int]:
+    """Stricter "letter" skeleton — ``iterated_skeleton`` followed by
+    removal of every codepoint with ``canonicalCombiningClass > 0``.
+
+    Catches two adjacent classes of typosquat attack that the bare
+    §4+§5.4 skeleton misses by strict-equality test:
+
+      (1) base-letter+combining-mark confusables
+          (e.g. U+0247 ɇ → e + ◌̸), and
+      (2) cascading-substitute confusables where one substitute pass
+          isn't enough (e.g. U+2133 ℳ → U+004D → case-fold m →
+          requires a second substitute pass for m → rn).
+
+    Iterating `skeleton` to fixed point handles class (2); filtering
+    CCC > 0 codepoints from the result handles class (1).  Used by
+    `_find_target_match` for typosquat-style comparison; mirrors the
+    Lean ``Unicode.Confusables.letterSkeleton``.
+    """
+    return [cp for cp in iterated_skeleton(input_cps) if ucd.ccc(cp) == 0]
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Range predicates
 # ─────────────────────────────────────────────────────────────────────
@@ -276,14 +297,21 @@ def _ascii_codepoints(s: str) -> list[int]:
 
 
 def _find_target_match(
-    input_cps: list[int], iterated: list[int]
+    input_cps: list[int], _iterated: list[int]
 ) -> str | None:
+    """letter_skeleton strips combining marks from the §4+§5.4
+    iterated skeleton so that "base letter + accent" confusables
+    (U+0247 ɇ, U+0266 ɦ, etc.) and cascading-substitute confusables
+    (U+2133 ℳ via M → m → rn) collapse to the bare-letter target.
+    Mirrors the Lean ``Unicode.Confusables.letterSkeleton`` primitive.
+    """
+    input_letters = letter_skeleton(input_cps)
     for target in known_attack_targets():
         t_cps = _ascii_codepoints(target)
         if t_cps == input_cps:
             continue
-        t_skel = iterated_skeleton(t_cps)
-        if t_skel == iterated:
+        t_letters = letter_skeleton(t_cps)
+        if t_letters == input_letters:
             return target
     return None
 
