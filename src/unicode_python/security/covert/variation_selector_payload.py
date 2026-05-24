@@ -19,9 +19,58 @@ flagged.
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Union
 
 from ..calculus import ClassificationKind
+
+# ──────────────────────────────────────────────────────────────────────
+# Authoritative legal (base, VS) pair set — UCD StandardizedVariants
+# + UTS #51 emoji-variation-sequences.  Loaded lazily on first use.
+# ──────────────────────────────────────────────────────────────────────
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _parse_legal_variation_pairs() -> set[tuple[int, int]]:
+    out: set[tuple[int, int]] = set()
+    for fname in (
+        "StandardizedVariants.txt",
+        "emoji-variation-sequences.txt",
+    ):
+        path = _DATA_DIR / fname
+        with path.open("r", encoding="utf-8") as f:
+            for raw_line in f:
+                # Strip comment then take up to first ';'.
+                hash_idx = raw_line.find("#")
+                body = raw_line if hash_idx < 0 else raw_line[:hash_idx]
+                semi_idx = body.find(";")
+                pair_part = body if semi_idx < 0 else body[:semi_idx]
+                tokens = pair_part.split()
+                if len(tokens) < 2:
+                    continue
+                try:
+                    base = int(tokens[0], 16)
+                    vs = int(tokens[1], 16)
+                except ValueError:
+                    continue
+                out.add((base, vs))
+    return out
+
+
+_LEGAL_PAIRS: set[tuple[int, int]] | None = None
+
+
+def is_registered_variation_pair(base: int, vs: int) -> bool:
+    """True iff ``(base, vs)`` is a registered variation sequence
+    per UCD StandardizedVariants.txt or UTS #51
+    emoji-variation-sequences.txt.  Used to exempt legitimate
+    math / emoji-presentation variants from IllegalTarget
+    false-positives."""
+    global _LEGAL_PAIRS
+    if _LEGAL_PAIRS is None:
+        _LEGAL_PAIRS = _parse_legal_variation_pairs()
+    return (base, vs) in _LEGAL_PAIRS
 
 
 def is_variation_selector(cp: int) -> bool:
@@ -121,6 +170,18 @@ def detect(input_cps: list[int]) -> Verdict:
         return v
 
     v.recovered_bytes = _decode_vs_run(input_cps, v.vs_positions)
+
+    # Single-VS exemption: if exactly one VS follows a base AND the
+    # (base, VS) pair is registered in StandardizedVariants or
+    # emoji-variation-sequences, return Clear (legitimate variant).
+    if len(v.vs_positions) == 1:
+        p = v.vs_positions[0]
+        if p > 0:
+            base = input_cps[p - 1]
+            vs = input_cps[p]
+            if is_registered_variation_pair(base, vs):
+                return v  # Clear — registered variant
+
     v.kind = ClassificationKind.HAZARD
 
     if len(v.vs_positions) >= 4 and _all_same_vs(input_cps, v.vs_positions):
