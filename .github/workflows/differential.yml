@@ -1,0 +1,77 @@
+name: cross-port differential (Rust ≡ Python ≡ C++)
+
+# Runs on push to any of the three port branches.  Verifies that
+# all three implementations produce byte-identical Verdict JSONL
+# over a shared 100 000-input corpus.  Any divergence fails the
+# job — drift bug, regression, or new attack class one port missed.
+
+on:
+  push:
+    branches: [rust-port, python-port, cpp-port]
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout rust-port (generator + reference)
+        uses: actions/checkout@v4
+        with:
+          ref: rust-port
+          path: rust
+
+      - name: Checkout python-port
+        uses: actions/checkout@v4
+        with:
+          ref: python-port
+          path: python
+
+      - name: Checkout cpp-port
+        uses: actions/checkout@v4
+        with:
+          ref: cpp-port
+          path: cpp
+
+      - name: Install Rust + Python + g++
+        run: |
+          rustup toolchain install 1.75 --profile minimal --no-self-update
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3 g++ cmake
+
+      - name: Generate shared corpus (100 000 inputs)
+        working-directory: rust
+        run: cargo +1.75 test --release --test diff_runner diff_gen_corpus -- --nocapture
+
+      - name: Run rust-port verdicts
+        working-directory: rust
+        run: |
+          cargo +1.75 test --release --test diff_runner diff_run_against_corpus -- --nocapture 2>/dev/null \
+            | grep '^{' > /tmp/rust_diff.jsonl
+          wc -l /tmp/rust_diff.jsonl
+
+      - name: Run python-port verdicts
+        working-directory: python
+        run: |
+          PYTHONPATH=src python3 tests/diff_runner.py > /tmp/python_diff.jsonl
+          wc -l /tmp/python_diff.jsonl
+
+      - name: Build + run cpp-port verdicts
+        working-directory: cpp
+        run: |
+          g++ -std=c++23 -O2 -Iinclude -o /tmp/cpp_diff_runner tools/diff_runner.cpp
+          /tmp/cpp_diff_runner > /tmp/cpp_diff.jsonl
+          wc -l /tmp/cpp_diff.jsonl
+
+      - name: Diff three-way (byte-identical required)
+        run: |
+          diff -q /tmp/rust_diff.jsonl /tmp/python_diff.jsonl
+          diff -q /tmp/rust_diff.jsonl /tmp/cpp_diff.jsonl
+          echo
+          echo 'RUST ≡ PYTHON ≡ CPP at 100 000 inputs — byte-identical'
+
+      - name: Verdict distribution
+        run: |
+          echo '=== verdict-kind distribution ==='
+          grep -oE '"kind":"[A-Z][a-z]*"' /tmp/rust_diff.jsonl | sort | uniq -c
+          echo
+          echo '=== sub-threat distribution ==='
+          grep -oE '"sub":"[A-Z][A-Za-z]*"' /tmp/rust_diff.jsonl | sort | uniq -c

@@ -1,0 +1,86 @@
+name: rust-port CI
+
+on:
+  push:
+    branches: [rust-port]
+  pull_request:
+    branches: [rust-port]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rust-port
+
+      - name: Install toolchain
+        run: rustup toolchain install 1.75 --profile minimal --no-self-update
+
+      - name: cargo build --tests --release
+        run: cargo +1.75 build --tests --release
+
+      - name: codec + refinement tests
+        run: |
+          cargo +1.75 test --release --test utf8
+          cargo +1.75 test --release --test utf16
+          cargo +1.75 test --release --test utf32
+          cargo +1.75 test --release --test bom
+          cargo +1.75 test --release --test noncharacters
+          cargo +1.75 test --release --test identifier
+          cargo +1.75 test --release --test opaque_blob
+          cargo +1.75 test --release --test validated_utf8
+
+      - name: security suite (41 tests)
+        run: cargo +1.75 test --release --test security
+
+      - name: spot-check red-team (15 tests)
+        run: cargo +1.75 test --release --test redteam
+
+      - name: brutal red-team (20 tests)
+        run: cargo +1.75 test --release --test redteam_brutal
+
+      - name: deep red-team — mutation 29k + fuzz 100k + perf (11 tests)
+        run: cargo +1.75 test --release --test redteam_deep
+
+      - name: zero-width-bypass red-team (29-cp Default_Ignorable sweep)
+        run: cargo +1.75 test --release --test redteam_zw
+
+      - name: BidiControlBalance red-team (14 tests)
+        run: cargo +1.75 test --release --test redteam_bidi
+
+      - name: VariationSelectorPayload red-team (13 tests)
+        run: cargo +1.75 test --release --test redteam_vs
+
+      - name: TagBlockPayload red-team (15 tests)
+        run: cargo +1.75 test --release --test redteam_tag
+
+      - name: timing-channel red-team (constant-time variance < 20%)
+        run: cargo +1.75 test --release --test redteam_timing
+
+      - name: published-IOC corpus (CVE-2021-42574 / Nethereum / GoodSide / GlassWorm / Op Triangulation)
+        run: cargo +1.75 test --release --test corpus_iocs
+
+      - name: differential corpus generator (used by cross-port workflow)
+        run: cargo +1.75 test --release --test diff_runner diff_gen_corpus -- --nocapture
+
+  hardening-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rust-port
+      - name: reject unsafe code
+        run: |
+          # Cargo.toml declares `unsafe_code = "forbid"`.  Confirm
+          # no source file overrides via `#[allow(unsafe_code)]`.
+          if grep -rE '#\[allow\(unsafe_code' src/ tests/; then
+            echo "FATAL: unsafe-code allowance found"
+            exit 1
+          fi
+          echo "clean: no unsafe-code allowance"
+      - name: data-integrity gate
+        run: ./scripts/check-ucd-hashes.sh
