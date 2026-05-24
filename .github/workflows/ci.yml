@@ -1,0 +1,46 @@
+name: python-port CI
+
+on:
+  push:
+    branches: [python-port]
+  pull_request:
+    branches: [python-port]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: python-port
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: pytest tests/
+        run: PYTHONPATH=src pytest tests/ -v
+
+  hardening-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: python-port
+      - name: data-integrity gate (SHA-pin verification)
+        run: ./scripts/check-ucd-hashes.sh
+      - name: verify no `eval()` or `exec()` in source
+        run: |
+          if grep -rE '\beval\(|\bexec\(' src/ tests/ --include='*.py'; then
+            echo "FATAL: eval() or exec() in source"
+            exit 1
+          fi
+          echo "clean: no eval/exec in source"
