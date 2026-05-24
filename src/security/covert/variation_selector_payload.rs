@@ -9,13 +9,75 @@
 //! clipboard pipeline) preserves byte-for-byte.  Decoding pairs of
 //! VS codepoints back into bytes recovers an arbitrary payload.
 //!
-//! This port treats every variation-selector occurrence after a
-//! base codepoint as suspicious.  The Lean reference additionally
-//! exempts (base, VS) pairs that appear in
-//! `StandardizedVariants.txt` and emoji-presentation pairs — those
-//! exemptions require UCD tables.
+//! Exempts (base, VS) pairs that appear in
+//! `StandardizedVariants.txt` (1127 registered variation
+//! sequences) and `emoji-variation-sequences.txt` (371 emoji
+//! presentation pairs) per UCD 17.0 / UTS #51.  Without this
+//! exemption the detector false-positives on legitimate East-
+//! Asian text containing CJK Compatibility Ideograph + VS pairs
+//! and registered math-symbol variants — a state-level credibility
+//! issue for banking / govt deployments processing CJK identifiers.
+
+use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use crate::security::ClassificationKind;
+
+// ──────────────────────────────────────────────────────────────────────
+// Authoritative legal (base, VS) pair set
+// ──────────────────────────────────────────────────────────────────────
+
+const STANDARDIZED_VARIANTS_RAW: &str =
+    include_str!("../../../data/StandardizedVariants.txt");
+const EMOJI_VARIATION_SEQUENCES_RAW: &str =
+    include_str!("../../../data/emoji-variation-sequences.txt");
+
+fn parse_hex_u32(s: &str) -> Option<u32> {
+    u32::from_str_radix(s.trim(), 16).ok()
+}
+
+fn parse_legal_pairs() -> HashSet<(u32, u32)> {
+    let mut out = HashSet::new();
+    for source in [STANDARDIZED_VARIANTS_RAW, EMOJI_VARIATION_SEQUENCES_RAW] {
+        for raw_line in source.lines() {
+            let body = match raw_line.find('#') {
+                Some(idx) => &raw_line[..idx],
+                None => raw_line,
+            };
+            let stripped = body.trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            // Format: "<base-hex> <vs-hex>; <description>" — we only
+            // need the first two whitespace-separated hex tokens
+            // before the ';'.
+            let semi_idx = stripped.find(';').unwrap_or(stripped.len());
+            let pair_part = &stripped[..semi_idx];
+            let mut tokens = pair_part.split_whitespace();
+            let (Some(base_str), Some(vs_str)) = (tokens.next(), tokens.next())
+            else {
+                continue;
+            };
+            let (Some(base), Some(vs)) =
+                (parse_hex_u32(base_str), parse_hex_u32(vs_str))
+            else {
+                continue;
+            };
+            out.insert((base, vs));
+        }
+    }
+    out
+}
+
+/// True iff `(base, vs)` is a registered variation sequence per
+/// UCD 17.0 StandardizedVariants.txt or UTS #51
+/// emoji-variation-sequences.txt.  Used to exempt legitimate
+/// CJK Compatibility / math / emoji-presentation variants from
+/// IllegalTarget false-positives.
+pub fn is_registered_variation_pair(base: u32, vs: u32) -> bool {
+    static SET: OnceLock<HashSet<(u32, u32)>> = OnceLock::new();
+    SET.get_or_init(parse_legal_pairs).contains(&(base, vs))
+}
 
 pub fn is_variation_selector(cp: u32) -> bool {
     matches!(cp, 0xFE00..=0xFE0F | 0xE0100..=0xE01EF | 0x180B..=0x180D)
@@ -118,6 +180,25 @@ pub fn detect(input: &[u32]) -> Verdict {
     }
 
     v.recovered_bytes = decode_vs_run(input, &v.vs_positions);
+
+    // Single-VS exemption: if the entire VS run is exactly ONE
+    // VS codepoint following a base, and that (base, VS) pair is
+    // registered in StandardizedVariants or emoji-variation-
+    // sequences, the input is a legitimate registered variation
+    // (e.g. CJK Compatibility Ideograph + FE00, registered math
+    // variant, or emoji-style/text-style selector).  Return Clear.
+    if v.vs_positions.len() == 1 {
+        let p = v.vs_positions[0];
+        if p > 0 {
+            let base = input[p - 1];
+            let vs = input[p];
+            if is_registered_variation_pair(base, vs) {
+                // Legitimate variant — leave verdict Clear.
+                return v;
+            }
+        }
+    }
+
     v.kind = ClassificationKind::Hazard;
 
     if v.vs_positions.len() >= 4 && all_same_vs(input, &v.vs_positions) {
