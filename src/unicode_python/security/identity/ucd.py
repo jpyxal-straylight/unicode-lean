@@ -303,6 +303,70 @@ def to_nfc(input_cps: list[int]) -> list[int]:
     return _canonical_compose(decomposed)
 
 
+def to_nfd(input_cps: list[int]) -> list[int]:
+    """UAX #15 NFD — canonical decompose + canonical reorder, without
+    the recomposition pass.  Required by the UTS #39 §4 + §5.4
+    confusable-skeleton bracket."""
+    decomposed = _canonical_decompose(input_cps)
+    _canonical_reorder(decomposed)
+    return decomposed
+
+
+# ─────────────────────────────────────────────────────────────────────
+# CaseFolding.txt — default full case folding (RFC 8265 § 5.2.4)
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _parse_case_folding() -> dict[int, list[int]]:
+    text = _read_data_file("CaseFolding.txt")
+    out: dict[int, list[int]] = {}
+    for line in text.splitlines():
+        stripped = _strip_comment_and_trim(line)
+        if not stripped:
+            continue
+        parts = [p.strip() for p in stripped.split(";")]
+        if len(parts) < 3:
+            continue
+        status = parts[1]
+        # Keep only status C (Common) and F (Full) entries — the
+        # union RFC 8265 §5.2.4 calls "default full case folding".
+        # Status S (Simple) is redundant with C/F; status T is
+        # Turkic-locale-specific.
+        if status not in ("C", "F"):
+            continue
+        src = _parse_hex(parts[0])
+        tgt = [_parse_hex(t) for t in parts[2].split() if t]
+        if not tgt:
+            continue
+        out[src] = tgt
+    return out
+
+
+_CASE_FOLDING: dict[int, list[int]] | None = None
+
+
+def case_folding_table() -> dict[int, list[int]]:
+    global _CASE_FOLDING
+    if _CASE_FOLDING is None:
+        _CASE_FOLDING = _parse_case_folding()
+    return _CASE_FOLDING
+
+
+def case_fold(input_cps: list[int]) -> list[int]:
+    """Default full case folding of a codepoint sequence per RFC 8265
+    §5.2.4 / UCD CaseFolding.txt status C ∪ F.  Codepoints absent
+    from the table fold to themselves."""
+    table = case_folding_table()
+    out: list[int] = []
+    for cp in input_cps:
+        replacement = table.get(cp)
+        if replacement is None:
+            out.append(cp)
+        else:
+            out.extend(replacement)
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────
 # PropertyValueAliases.txt — Script long-name ↔ 4-letter abbrev
 # ─────────────────────────────────────────────────────────────────────

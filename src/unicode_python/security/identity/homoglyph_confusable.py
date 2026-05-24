@@ -130,12 +130,11 @@ def known_attack_targets() -> list[str]:
 # ─────────────────────────────────────────────────────────────────────
 
 
-def skeleton(input_cps: list[int]) -> list[int]:
-    """One application of the UTS #39 confusable mapping.
-
-    Each codepoint is replaced by its skeleton image (if present in
-    the confusables map) or by itself (if absent).
-    """
+def _substitute(input_cps: list[int]) -> list[int]:
+    """Inner substitution step of the UTS #39 skeleton — replaces
+    each codepoint by its confusables target sequence (codepoints
+    absent from the table are kept).  Not the full skeleton; the
+    case-folded NFD bracket is applied by ``skeleton``."""
     cmap = confusables_map()
     out: list[int] = []
     for cp in input_cps:
@@ -145,6 +144,24 @@ def skeleton(input_cps: list[int]) -> list[int]:
         else:
             out.extend(replacement)
     return out
+
+
+def skeleton(input_cps: list[int]) -> list[int]:
+    """The case-insensitive confusables skeleton per UTS #39 §4 + §5.4:
+
+        skeleton(X) = toNFD(caseFold(substitute(caseFold(toNFD(X)))))
+
+    Bracketing case folding inside the NFD passes lets the detector
+    collapse case-variant typosquats on case-insensitive registries
+    (npm / PyPI / NuGet package IDs, IDN labels) to a single canonical
+    representative.  Mirrors the Lean ``Unicode.Confusables.skeleton``
+    definition.
+    """
+    step1 = ucd.to_nfd(input_cps)
+    step2 = ucd.case_fold(step1)
+    step3 = _substitute(step2)
+    step4 = ucd.case_fold(step3)
+    return ucd.to_nfd(step4)
 
 
 def iterated_skeleton(input_cps: list[int]) -> list[int]:
