@@ -590,6 +590,76 @@ def is_id_allowed(cp: int) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# DerivedCoreProperties.txt — Default_Ignorable_Code_Point ranges
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _parse_default_ignorable() -> list[tuple[int, int]]:
+    text = _read_data_file("DerivedCoreProperties.txt")
+    out: list[tuple[int, int]] = []
+    for line in text.splitlines():
+        stripped = _strip_comment_and_trim(line)
+        if not stripped:
+            continue
+        parts = stripped.split(";", 1)
+        if len(parts) < 2:
+            continue
+        if parts[1].strip() != "Default_Ignorable_Code_Point":
+            continue
+        out.append(_parse_range_field(parts[0]))
+    out.sort(key=lambda r: r[0])
+    return out
+
+
+_DEFAULT_IGNORABLE: list[tuple[int, int]] | None = None
+
+
+def _default_ignorable_ranges() -> list[tuple[int, int]]:
+    global _DEFAULT_IGNORABLE
+    if _DEFAULT_IGNORABLE is None:
+        _DEFAULT_IGNORABLE = _parse_default_ignorable()
+    return _DEFAULT_IGNORABLE
+
+
+def is_default_ignorable(cp: int) -> bool:
+    """UAX #44 Default_Ignorable_Code_Point — covers invisible /
+    format-control characters (ZWSP, ZWNJ, ZWJ, WJ, BOM, soft hyphen,
+    bidi controls, Mongolian / variation selectors, tag block, etc.).
+    Used by `letter_skeleton` to close the invisible-insertion bypass."""
+    table = _default_ignorable_ranges()
+    idx = _partition_point(table, lambda r: r[0], cp)
+    if idx > 0:
+        entry = table[idx - 1]
+        if cp <= entry[1]:
+            return True
+    return False
+
+
+def is_white_space(cp: int) -> bool:
+    """UCD PropList.txt White_Space — covers ASCII tab/newline/space,
+    NBSP (U+00A0), NNBSP (U+202F — often abused for invisibility),
+    space-separator U+2000..U+200A, line/paragraph separators,
+    medium math space, ideographic space.  Hardcoded since the
+    range table is small and stable.
+
+    Used by `letter_skeleton` to strip whitespace from typosquat
+    comparison — whitespace inside an identifier is universally
+    attacker abuse, never legitimate."""
+    return (
+        (0x0009 <= cp <= 0x000D)
+        or cp == 0x0020
+        or cp == 0x0085
+        or cp == 0x00A0
+        or cp == 0x1680
+        or (0x2000 <= cp <= 0x200A)
+        or (0x2028 <= cp <= 0x2029)
+        or cp == 0x202F
+        or cp == 0x205F
+        or cp == 0x3000
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
 # UTS #39 § 5.1 Restriction-level classification
 # ─────────────────────────────────────────────────────────────────────
 

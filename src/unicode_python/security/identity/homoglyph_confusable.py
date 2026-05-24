@@ -180,23 +180,26 @@ def iterated_skeleton(input_cps: list[int]) -> list[int]:
 
 def letter_skeleton(input_cps: list[int]) -> list[int]:
     """Stricter "letter" skeleton — ``iterated_skeleton`` followed by
-    removal of every codepoint with ``canonicalCombiningClass > 0``.
+    removal of (a) every codepoint with ``canonicalCombiningClass > 0``,
+    (b) every codepoint with the ``Default_Ignorable_Code_Point``
+    derived property, AND (c) every whitespace codepoint.
 
-    Catches two adjacent classes of typosquat attack that the bare
-    §4+§5.4 skeleton misses by strict-equality test:
+    Catches three adjacent classes of typosquat attack:
+      (1) base-letter+combining-mark confusables (U+0247 ɇ → e + ◌̸)
+      (2) cascading-substitute confusables (U+2133 ℳ via M → m → rn)
+      (3) invisible-codepoint insertion (ZWSP / ZWNJ / ZWJ / WJ /
+          BOM / NNBSP / soft hyphen / bidi controls / Mongolian /
+          variation selectors / tag block)
 
-      (1) base-letter+combining-mark confusables
-          (e.g. U+0247 ɇ → e + ◌̸), and
-      (2) cascading-substitute confusables where one substitute pass
-          isn't enough (e.g. U+2133 ℳ → U+004D → case-fold m →
-          requires a second substitute pass for m → rn).
-
-    Iterating `skeleton` to fixed point handles class (2); filtering
-    CCC > 0 codepoints from the result handles class (1).  Used by
-    `_find_target_match` for typosquat-style comparison; mirrors the
-    Lean ``Unicode.Confusables.letterSkeleton``.
+    Mirrors the Lean ``Unicode.Confusables.letterSkeleton``.
     """
-    return [cp for cp in iterated_skeleton(input_cps) if ucd.ccc(cp) == 0]
+    return [
+        cp
+        for cp in iterated_skeleton(input_cps)
+        if ucd.ccc(cp) == 0
+        and not ucd.is_default_ignorable(cp)
+        and not ucd.is_white_space(cp)
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────
